@@ -157,6 +157,36 @@ export interface SkillManifestEntry {
   is_executable: boolean;
 }
 
+/**
+ * Skill dependency — references another skill by ID.
+ * Used to build skill dependency graphs and auto-load dependencies at runtime.
+ */
+export interface SkillDependency {
+  /** Skill ID of the dependency */
+  skill_id: string;
+  /** Optional version constraint (e.g., ">=1.0.0") */
+  version_constraint?: string;
+  /** Whether this dependency is required or optional */
+  required: boolean;
+}
+
+/**
+ * Skill composition step — defines a step in a multi-skill workflow.
+ * Composite skills orchestrate multiple skills in sequence.
+ */
+export interface SkillCompositionStep {
+  /** Step name (for logging/debugging) */
+  name: string;
+  /** Skill ID to invoke */
+  skill_id: string;
+  /** Input mapping: step_input_key → workflow_input_key or literal value */
+  input_mapping?: Record<string, string>;
+  /** Output mapping: step_output_key → workflow_output_key */
+  output_mapping?: Record<string, string>;
+  /** Whether to continue on error (default: false — stop workflow) */
+  continue_on_error?: boolean;
+}
+
 // ============================
 // Skill dedup / propose types (M13 — two-step confirmation)
 // ============================
@@ -205,6 +235,11 @@ export interface Skill {
   metadata_json: string;
   created_at_ms: number;
   updated_at_ms: number;
+
+  /** Skill dependencies — other skills this skill depends on */
+  dependencies?: SkillDependency[];
+  /** Composition steps — for composite skills that orchestrate multiple skills */
+  composition?: SkillCompositionStep[];
 }
 
 /** `appendVersion` 的入参。store 内部基于 head 推导 version+1。 */
@@ -228,7 +263,10 @@ export interface AppendVersionInput {
   /** 仅 create 时由调用方指定为 owner_agent_id；后续版本由 store 校验后从 head 继承。 */
   owner_agent_id?: string;
 
-  metadata_json?: string;
+  /** Skill dependencies */
+  dependencies?: SkillDependency[];
+  /** Composition steps */
+  composition?: SkillCompositionStep[];
 }
 
 /** `listSkills` 的查询参数。仅返回 head + (status 满足) 的行。四个 ID 全部可选，传了就过滤。 */
