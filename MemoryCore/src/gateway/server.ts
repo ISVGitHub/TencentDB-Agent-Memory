@@ -113,6 +113,7 @@ import { SearchRouter } from "../core/store/search-backend.js";
 import type { ISearchBackend } from "../core/store/search-backend.js";
 import { OpenSearchBackend } from "../core/store/opensearch-backend.js";
 import { QdrantBackend } from "../core/store/qdrant-backend.js";
+import { getMetrics, METRICS } from "./metrics.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
@@ -856,6 +857,7 @@ export class TdaiGateway {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const method = req.method?.toUpperCase() ?? "GET";
     const pathname = url.pathname;
+    const reqStartMs = Date.now();
 
     // Apply CORS headers based on configured allow-list (empty → no headers).
     this.applyCorsHeaders(req, res);
@@ -1101,6 +1103,11 @@ export class TdaiGateway {
         return this.handleHealth(res);
       }
 
+      // GET /metrics — Prometheus text format
+      if (method === "GET" && pathname === "/metrics") {
+        return this.handleMetrics(res);
+      }
+
       // All other routes go through the optional auth gate. When apiKey is
       // unset the gate is a no-op (preserves legacy open behaviour) — the
       // startup WARN in `logSecurityPosture` covers that case.
@@ -1141,6 +1148,15 @@ export class TdaiGateway {
         message: classified.client.message,
         trace_id: classified.client.trace_id,
         retryable: classified.client.retryable,
+      });
+    } finally {
+      // Track request duration
+      const durationSec = (Date.now() - reqStartMs) / 1000;
+      const status = res.statusCode;
+      getMetrics().observeHistogram(METRICS.REQUEST_DURATION_SECONDS, durationSec, {
+        method,
+        path: pathname.split("/").slice(0, 4).join("/"), // normalize path
+        status: String(status),
       });
     }
   }
@@ -1428,6 +1444,33 @@ export class TdaiGateway {
         : [],
     };
     sendJson(res, 200, response);
+  }
+
+  private handleMetrics(res: http.ServerResponse): void {
+    const metrics = getMetrics();
+
+    // Update dynamic gauges
+    metrics.setGauge(METRICS.UPTIME_SECONDS, Math.floor((Date.now() - this.startTime) / 1000));
+
+    if (this.rateLimiter) {
+      const stats = this.rateLimiter.stats();
+      metrics.setGauge(METRICS.RATE_LIMITER_ACTIVE_KEYS, stats.activeKeys);
+      metrics.setGauge(METRICS.RATE_LIMITER_FINGERPRINTS, stats.fingerprintCount);
+    }
+
+    if (this.searchRouter) {
+      const backends = this.searchRouter.getBackends();
+      for (const backend of backends) {
+        metrics.setGauge(METRICS.SEARCH_BACKEND_HEALTH, 1, { backend: backend.name });
+      }
+    }
+
+    const body = metrics.render();
+    res.writeHead(200, {
+      "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+      "Content-Length": Buffer.byteLength(body),
+    });
+    res.end(body);
   }
 
   private async handleRecall(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

@@ -1,0 +1,132 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "tdai_uptime_seconds", "legendFormat": "uptime" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "title": "Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(tdai_request_duration_seconds_count[5m])) by (path)",
+          "legendFormat": "{{path}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "title": "Request Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(tdai_request_duration_seconds_bucket[5m])) by (le, path))",
+          "legendFormat": "p95 {{path}}"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(tdai_request_duration_seconds_bucket[5m])) by (le, path))",
+          "legendFormat": "p50 {{path}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Memory Writes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(rate(tdai_memory_write_total[5m])) by (layer)",
+          "legendFormat": "{{layer}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "title": "Memory Searches",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(rate(tdai_memory_search_total[5m])) by (backend)",
+          "legendFormat": "{{backend}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "title": "LLM Calls",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum(rate(tdai_llm_calls_total[5m])) by (purpose)",
+          "legendFormat": "{{purpose}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "title": "Pipeline Runs",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum(rate(tdai_pipeline_runs_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "title": "Rate Limiter",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "tdai_rate_limiter_active_keys", "legendFormat": "active keys" },
+        { "expr": "tdai_rate_limiter_fingerprints", "legendFormat": "fingerprints" }
+      ]
+    },
+    {
+      "title": "Search Backend Health",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
+      "targets": [
+        { "expr": "tdai_search_backend_health", "legendFormat": "{{backend}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["tdai", "memory"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "TencentDB Agent Memory",
+  "uid": "tdai-memory"
+}
