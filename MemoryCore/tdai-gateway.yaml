@@ -142,6 +142,27 @@ rateLimiter:
   dedupEnabled: true             # 启用内容指纹去重
   maxFingerprints: 10000         # 最大指纹缓存数
 
+# ── 外部搜索后端 (OpenSearch / Qdrant) ──
+# 启用后，搜索结果通过 RRF (Reciprocal Rank Fusion) 融合
+# 与内置 SQLite FTS5 + sqlite-vec 互补
+# search:
+#   enabled: true
+#   maxResults: 10
+#   scoreThreshold: 0.3
+#   timeoutMs: 5000
+#   backends:
+#     - type: opensearch
+#       enabled: true
+#       url: "http://127.0.0.1:9200"
+#       index: "tdai-l1"
+#       # username: ""
+#       # password: ""
+#     - type: qdrant
+#       enabled: true
+#       url: "http://127.0.0.1:6333"
+#       collection: "tdai-l1"
+#       # api_key: ""
+
 # ── 可观测性配置（本地开发） ──
 observability:
   otel:

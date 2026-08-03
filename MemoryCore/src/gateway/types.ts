@@ -34,6 +34,12 @@ export interface HealthResponse {
     activeKeys: number;
     fingerprintCount: number;
   } | null;
+  /** Search backends status (empty when no external backends configured) */
+  searchBackends?: Array<{
+    name: string;
+    keyword: boolean;
+    vector: boolean;
+  }>;
 }
 
 // ============================

@@ -239,6 +239,41 @@ export interface RateLimiterConfig {
   maxFingerprints: number;
 }
 
+export interface OpenSearchBackendConfig {
+  type: "opensearch";
+  enabled: boolean;
+  url: string;
+  index: string;
+  username?: string;
+  password?: string;
+  vectorDimensions?: number;
+}
+
+export interface QdrantBackendConfig {
+  type: "qdrant";
+  enabled: boolean;
+  url: string;
+  collection: string;
+  api_key?: string;
+  vectorDimensions?: number;
+  distance?: "Cosine" | "Euclid" | "Dot";
+}
+
+export type SearchBackendConfigEntry = OpenSearchBackendConfig | QdrantBackendConfig;
+
+export interface SearchConfig {
+  /** Whether external search backends are enabled. Default: false */
+  enabled: boolean;
+  /** Maximum results from search. Default: 10 */
+  maxResults: number;
+  /** Score threshold (0–1). Default: 0.3 */
+  scoreThreshold: number;
+  /** Search timeout in ms. Default: 5000 */
+  timeoutMs: number;
+  /** External search backends */
+  backends: SearchBackendConfigEntry[];
+}
+
 export interface GatewayConfig {
   /**
    * Deployment mode. Default: "standalone".
@@ -293,6 +328,8 @@ export interface GatewayConfig {
   memory: MemoryTdaiConfig;
   /** Write-path rate limiter config. yaml: rateLimiter */
   rateLimiter: RateLimiterConfig;
+  /** External search backends config. yaml: search */
+  search: SearchConfig;
 
   /**
    * Optional Skill module config — passed through to MemoryTdaiConfig.skill
@@ -714,6 +751,43 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     maxFingerprints: num(rlConfig, "maxFingerprints") ?? 10000,
   };
 
+  // Search backends config (yaml: search)
+  const searchRaw = obj(fileConfig, "search");
+  const searchBackendsRaw = Array.isArray(searchRaw.backends) ? searchRaw.backends : [];
+  const searchBackends: SearchBackendConfigEntry[] = searchBackendsRaw
+    .filter((b): b is Record<string, unknown> => typeof b === "object" && b !== null)
+    .map((b) => {
+      const type = str(b, "type") ?? "opensearch";
+      if (type === "opensearch") {
+        return {
+          type: "opensearch" as const,
+          enabled: bool(b, "enabled") ?? true,
+          url: str(b, "url") ?? "http://127.0.0.1:9200",
+          index: str(b, "index") ?? "tdai-l1",
+          username: str(b, "username"),
+          password: str(b, "password"),
+          vectorDimensions: num(b, "vectorDimensions"),
+        };
+      }
+      // qdrant
+      return {
+        type: "qdrant" as const,
+        enabled: bool(b, "enabled") ?? true,
+        url: str(b, "url") ?? "http://127.0.0.1:6333",
+        collection: str(b, "collection") ?? "tdai-l1",
+        api_key: str(b, "api_key"),
+        vectorDimensions: num(b, "vectorDimensions"),
+        distance: str(b, "distance") as "Cosine" | "Euclid" | "Dot" | undefined,
+      };
+    });
+  const search: SearchConfig = {
+    enabled: bool(searchRaw, "enabled") ?? searchBackends.some((b) => b.enabled),
+    maxResults: num(searchRaw, "maxResults") ?? 10,
+    scoreThreshold: num(searchRaw, "scoreThreshold") ?? 0.3,
+    timeoutMs: num(searchRaw, "timeoutMs") ?? 5000,
+    backends: searchBackends,
+  };
+
   const offloadConfig = obj(fileConfig, "offload");
   const offload = {
     forceTriggerThreshold: num(offloadConfig, "forceTriggerThreshold") ?? 4,
@@ -743,6 +817,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     llm,
     memory,
     rateLimiter,
+    search,
     redis,
     shark,
     scanner,

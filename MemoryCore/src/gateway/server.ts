@@ -109,6 +109,10 @@ import type { StatefulPipelineManager } from "../utils/stateful-pipeline-manager
 import type { PipelineLogger } from "../utils/pipeline-factory.js";
 import { parsePipelineTimerMember } from "../core/state/timer-member.js";
 import { WriteRateLimiter, isWritePath, buildRateLimitKey, computeFingerprint } from "./rate-limiter.js";
+import { SearchRouter } from "../core/store/search-backend.js";
+import type { ISearchBackend } from "../core/store/search-backend.js";
+import { OpenSearchBackend } from "../core/store/opensearch-backend.js";
+import { QdrantBackend } from "../core/store/qdrant-backend.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
@@ -302,6 +306,9 @@ export class TdaiGateway {
 
   // ── Write-path rate limiter ──
   private rateLimiter: WriteRateLimiter | null = null;
+
+  // ── Search router (OpenSearch/Qdrant backends) ──
+  private searchRouter: SearchRouter | null = null;
 
   // ── Skill conversation-add (§21): per-instance handler+worker cache ──
   //
@@ -589,6 +596,29 @@ export class TdaiGateway {
       );
     }
 
+    // ── Initialize search backends (OpenSearch/Qdrant) ──
+    if (this.config.search?.enabled && this.config.search.backends.length > 0) {
+      this.searchRouter = new SearchRouter(this.config.search, this.logger);
+      for (const backendCfg of this.config.search.backends) {
+        if (!backendCfg.enabled) continue;
+        try {
+          let backend: ISearchBackend;
+          if (backendCfg.type === "opensearch") {
+            backend = new OpenSearchBackend(backendCfg, this.logger);
+          } else {
+            backend = new QdrantBackend(backendCfg, this.logger);
+          }
+          await backend.init();
+          this.searchRouter.addBackend(backend);
+          this.logger.info(`${TAG} Search backend registered: ${backend.name}`);
+        } catch (err) {
+          this.logger.warn(`${TAG} Failed to init search backend ${backendCfg.type}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      const health = await this.searchRouter.healthCheck();
+      this.logger.info(`${TAG} Search backends health: ${JSON.stringify(health)}`);
+    }
+
     // ── Initialize Opik tracer for offload server ──
     await initServerOpikTracer(this.logger);
 
@@ -754,6 +784,12 @@ export class TdaiGateway {
     if (this.rateLimiter) {
       this.rateLimiter.stopCleanup();
       this.logger.info("Rate limiter stopped");
+    }
+
+    // Close search backends
+    if (this.searchRouter) {
+      await this.searchRouter.close();
+      this.logger.info("Search backends closed");
     }
 
     // 优雅关闭 OTel SDK（flush 剩余 Span/Log）
@@ -1386,6 +1422,10 @@ export class TdaiGateway {
       },
       // Rate limiter stats
       rateLimiter: this.rateLimiter ? this.rateLimiter.stats() : null,
+      // Search backends status
+      searchBackends: this.searchRouter
+        ? this.searchRouter.getBackends().map((b) => ({ name: b.name, keyword: b.supportsKeywordSearch(), vector: b.supportsVectorSearch() }))
+        : [],
     };
     sendJson(res, 200, response);
   }
