@@ -30,6 +30,7 @@
     "seed-v2": "node ./bin/seed-v2.mjs",
     "backup": "node --import tsx scripts/backup.ts",
     "mcp-server": "node --import tsx scripts/mcp-server.ts",
+    "bundle": "node --import tsx scripts/bundle.ts",
     "test": "vitest run",
     "test:oss": "vitest run -c vitest.oss.config.ts",
     "test:watch": "vitest",
