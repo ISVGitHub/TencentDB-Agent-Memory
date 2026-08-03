@@ -134,6 +134,14 @@ skill:
 
   # versionTtlDays: 0             # 旧（非 head）版本过期天数，0=永不过期
 
+# ── 写入路径速率限制 ──
+rateLimiter:
+  enabled: true
+  maxWritesPerMinute: 60         # 每个 agent 每分钟最大写入数
+  dedupWindowSeconds: 300        # 指纹去重窗口（秒）
+  dedupEnabled: true             # 启用内容指纹去重
+  maxFingerprints: 10000         # 最大指纹缓存数
+
 # ── 可观测性配置（本地开发） ──
 observability:
   otel:

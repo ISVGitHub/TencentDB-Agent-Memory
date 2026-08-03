@@ -28,6 +28,7 @@ import { executeMemorySearch } from "../core/tools/memory-search.js";
 import { executeConversationSearch } from "../core/tools/conversation-search.js";
 import type { MemoryRecord } from "../core/record/l1-writer.js";
 import { reportRecallMetrics } from "../core/report/metric-tracking-recall.js";
+import { computeFingerprint, buildRateLimitKey } from "./rate-limiter.js";
 
 // ── Zod schemas (validated types + defaults) ──
 import {
@@ -261,6 +262,9 @@ export interface V2RouterDeps {
 
   /** Quota manager for memory/credit limit checks and usage reporting (service mode). */
   quotaManager?: import("../core/quota/quota-manager.js").QuotaManager;
+
+  /** Write-path rate limiter for fingerprint dedup on conversation/add. */
+  rateLimiter?: import("./rate-limiter.js").WriteRateLimiter;
 
   /**
    * 拿到 (per instance) 的 MetadataService。仅当 `/v2/conversation/add` 首次
@@ -671,6 +675,24 @@ async function handleConversationAdd(body: unknown, auth: V2AuthContext, request
     const check = await deps.quotaManager.checkMemoryQuota(auth.serviceId, messages.length);
     if (!check.allowed) {
       return errorEnvelope(4291, `Memory limit exceeded (current=${check.current}, limit=${check.limit})`, requestId);
+    }
+  }
+
+  // Fingerprint dedup: check for duplicate messages in the write window
+  if (deps.rateLimiter && messages.length > 0) {
+    const agentId = iso?.agentId;
+    const rateLimitKey = buildRateLimitKey(auth.serviceId, agentId);
+    for (const msg of messages) {
+      const fingerprint = computeFingerprint(msg.content);
+      const dedupCheck = deps.rateLimiter.check(rateLimitKey, fingerprint);
+      if (!dedupCheck.allowed) {
+        return errorEnvelope(
+          429,
+          dedupCheck.reason,
+          requestId,
+          { retry_after_ms: dedupCheck.retryAfterMs },
+        );
+      }
     }
   }
 

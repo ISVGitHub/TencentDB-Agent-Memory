@@ -226,6 +226,19 @@ export interface ZhiYanConfig {
   exportInterval: number;
 }
 
+export interface RateLimiterConfig {
+  /** Enable write-path rate limiting. Default: true */
+  enabled: boolean;
+  /** Max write requests per minute per (serviceId, agentId). Default: 60 */
+  maxWritesPerMinute: number;
+  /** Dedup window in seconds for fingerprint matching. Default: 300 (5 min) */
+  dedupWindowSeconds: number;
+  /** Enable fingerprint deduplication. Default: true */
+  dedupEnabled: boolean;
+  /** Max fingerprint cache size. Default: 10000 */
+  maxFingerprints: number;
+}
+
 export interface GatewayConfig {
   /**
    * Deployment mode. Default: "standalone".
@@ -278,6 +291,8 @@ export interface GatewayConfig {
   llm: StandaloneLLMConfig;
   /** Parsed memory-tdai plugin config (recall, capture, extraction, pipeline, etc.). */
   memory: MemoryTdaiConfig;
+  /** Write-path rate limiter config. yaml: rateLimiter */
+  rateLimiter: RateLimiterConfig;
 
   /**
    * Optional Skill module config — passed through to MemoryTdaiConfig.skill
@@ -689,6 +704,16 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
       : undefined,
   };
 
+  // Rate limiter config (yaml: rateLimiter)
+  const rlConfig = obj(fileConfig, "rateLimiter");
+  const rateLimiter: RateLimiterConfig = {
+    enabled: bool(rlConfig, "enabled") ?? true,
+    maxWritesPerMinute: envInt("TDAI_RATE_LIMIT_MAX_WRITES") ?? num(rlConfig, "maxWritesPerMinute") ?? 60,
+    dedupWindowSeconds: envInt("TDAI_RATE_LIMIT_DEDUP_WINDOW") ?? num(rlConfig, "dedupWindowSeconds") ?? 300,
+    dedupEnabled: bool(rlConfig, "dedupEnabled") ?? true,
+    maxFingerprints: num(rlConfig, "maxFingerprints") ?? 10000,
+  };
+
   const offloadConfig = obj(fileConfig, "offload");
   const offload = {
     forceTriggerThreshold: num(offloadConfig, "forceTriggerThreshold") ?? 4,
@@ -717,6 +742,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     data: { baseDir },
     llm,
     memory,
+    rateLimiter,
     redis,
     shark,
     scanner,

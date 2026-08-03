@@ -29,6 +29,11 @@ export interface HealthResponse {
     pipelineWorker: unknown;
     stateBackend: string;
   };
+  /** Write-path rate limiter stats (null when disabled) */
+  rateLimiter?: {
+    activeKeys: number;
+    fingerprintCount: number;
+  } | null;
 }
 
 // ============================

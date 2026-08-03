@@ -108,6 +108,7 @@ import type { PipelineWorker } from "../services/pipeline-worker.js";
 import type { StatefulPipelineManager } from "../utils/stateful-pipeline-manager.js";
 import type { PipelineLogger } from "../utils/pipeline-factory.js";
 import { parsePipelineTimerMember } from "../core/state/timer-member.js";
+import { WriteRateLimiter, isWritePath, buildRateLimitKey, computeFingerprint } from "./rate-limiter.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
@@ -298,6 +299,9 @@ export class TdaiGateway {
   private metadataStorePool: MetadataStorePool | null = null;
   private memorySystemUserConfig: MemorySystemUserConfig | undefined;
   private readonly metadataServiceByInstance = new Map<string, MetadataService>();
+
+  // ── Write-path rate limiter ──
+  private rateLimiter: WriteRateLimiter | null = null;
 
   // ── Skill conversation-add (§21): per-instance handler+worker cache ──
   //
@@ -575,6 +579,16 @@ export class TdaiGateway {
     // Initialize core
     await this.core.initialize();
 
+    // ── Initialize write-path rate limiter ──
+    if (this.config.rateLimiter?.enabled !== false) {
+      this.rateLimiter = new WriteRateLimiter(this.config.rateLimiter);
+      this.rateLimiter.startCleanup();
+      this.logger.info(
+        `${TAG} Write rate limiter enabled: maxWritesPerMinute=${this.config.rateLimiter?.maxWritesPerMinute ?? 60}, ` +
+        `dedupWindowSeconds=${this.config.rateLimiter?.dedupWindowSeconds ?? 300}, dedupEnabled=${this.config.rateLimiter?.dedupEnabled ?? true}`,
+      );
+    }
+
     // ── Initialize Opik tracer for offload server ──
     await initServerOpikTracer(this.logger);
 
@@ -736,6 +750,12 @@ export class TdaiGateway {
   private async doStop(): Promise<void> {
     this.logger.info("Shutting down gateway...");
 
+    // Stop rate limiter cleanup
+    if (this.rateLimiter) {
+      this.rateLimiter.stopCleanup();
+      this.logger.info("Rate limiter stopped");
+    }
+
     // 优雅关闭 OTel SDK（flush 剩余 Span/Log）
     try {
       await shutdownOTelSDK();
@@ -871,6 +891,34 @@ export class TdaiGateway {
         if (!this.checkAuthForV2(req, res)) return;
       }
 
+      // ── Write-path rate limiting ──
+      if (this.rateLimiter && isWritePath(pathname) && method === "POST") {
+        // Extract agent_id from x-tdai-agent-id header for per-agent limiting
+        const headers = req.headers as Record<string, string | string[] | undefined>;
+        const agentId = (Array.isArray(headers["x-tdai-agent-id"])
+          ? headers["x-tdai-agent-id"][0]
+          : headers["x-tdai-agent-id"]) || undefined;
+        const serviceId = (Array.isArray(headers["x-tdai-service-id"])
+          ? headers["x-tdai-service-id"][0]
+          : headers["x-tdai-service-id"]) || "default";
+        const rateLimitKey = buildRateLimitKey(serviceId, agentId);
+
+        // Quick check without body parse (for rate limit exceeded cases)
+        const quickCheck = this.rateLimiter.check(rateLimitKey);
+        if (!quickCheck.allowed) {
+          this.logger.warn(
+            `${TAG} Rate limit [${pathname}] key=${rateLimitKey}: ${quickCheck.reason}`,
+          );
+          sendJson(res, 429, {
+            code: 429,
+            message: quickCheck.reason,
+            request_id: `req-${Date.now().toString(36)}`,
+            retry_after_ms: quickCheck.retryAfterMs,
+          });
+          return;
+        }
+      }
+
       const v2Deps: V2RouterDeps = {
         getStore: () => this.core.getVectorStore(),
         getEmbedding: () => this.core.getEmbeddingService(),
@@ -889,6 +937,8 @@ export class TdaiGateway {
         // 并绑定到 agent。首次写入触发 create + bind；后续同 (team, agent) 走
         // MetadataService 的进程内 LRU 短路。
         getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
+        // Write-path rate limiter for fingerprint dedup
+        rateLimiter: this.rateLimiter ?? undefined,
       };
 
       // Skill module deps — composed alongside V2RouterDeps so v2-router.ts
@@ -1334,6 +1384,8 @@ export class TdaiGateway {
         pipelineWorker: this.pipelineWorker?.getMetrics() ?? null,
         stateBackend: this.stateBackend ? "connected" : "none",
       },
+      // Rate limiter stats
+      rateLimiter: this.rateLimiter ? this.rateLimiter.stats() : null,
     };
     sendJson(res, 200, response);
   }
