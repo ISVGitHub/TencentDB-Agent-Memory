@@ -114,6 +114,7 @@ import type { ISearchBackend } from "../core/store/search-backend.js";
 import { OpenSearchBackend } from "../core/store/opensearch-backend.js";
 import { QdrantBackend } from "../core/store/qdrant-backend.js";
 import { getMetrics, METRICS } from "./metrics.js";
+import { TtlSweepService } from "../services/ttl-sweep.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
@@ -310,6 +311,9 @@ export class TdaiGateway {
 
   // ── Search router (OpenSearch/Qdrant backends) ──
   private searchRouter: SearchRouter | null = null;
+
+  // ── TTL sweep service ──
+  private ttlSweep: TtlSweepService | null = null;
 
   // ── Skill conversation-add (§21): per-instance handler+worker cache ──
   //
@@ -620,6 +624,16 @@ export class TdaiGateway {
       this.logger.info(`${TAG} Search backends health: ${JSON.stringify(health)}`);
     }
 
+    // ── Initialize TTL sweep service ──
+    if (this.config.ttl?.enabled) {
+      this.ttlSweep = new TtlSweepService({
+        config: this.config.ttl,
+        logger: this.logger,
+        getStore: () => this.core.getVectorStore() ?? undefined,
+      });
+      this.ttlSweep.start();
+    }
+
     // ── Initialize Opik tracer for offload server ──
     await initServerOpikTracer(this.logger);
 
@@ -791,6 +805,11 @@ export class TdaiGateway {
     if (this.searchRouter) {
       await this.searchRouter.close();
       this.logger.info("Search backends closed");
+    }
+
+    // Stop TTL sweep
+    if (this.ttlSweep) {
+      this.ttlSweep.stop();
     }
 
     // 优雅关闭 OTel SDK（flush 剩余 Span/Log）

@@ -274,6 +274,21 @@ export interface SearchConfig {
   backends: SearchBackendConfigEntry[];
 }
 
+export interface TtlConfig {
+  /** Whether TTL sweep is enabled. Default: false */
+  enabled: boolean;
+  /** L0 TTL in days. Default: 30. 0 = no expiry */
+  l0Days: number;
+  /** L1 TTL in days. Default: 180. 0 = no expiry */
+  l1Days: number;
+  /** Grace period in days before hard delete. Default: 7 */
+  gracePeriodDays: number;
+  /** Sweep interval in hours. Default: 24 */
+  sweepIntervalHours: number;
+  /** Dry run mode — log but don't delete. Default: false */
+  dryRun: boolean;
+}
+
 export interface GatewayConfig {
   /**
    * Deployment mode. Default: "standalone".
@@ -330,6 +345,8 @@ export interface GatewayConfig {
   rateLimiter: RateLimiterConfig;
   /** External search backends config. yaml: search */
   search: SearchConfig;
+  /** Memory TTL and compaction config. yaml: ttl */
+  ttl: TtlConfig;
 
   /**
    * Optional Skill module config — passed through to MemoryTdaiConfig.skill
@@ -788,6 +805,17 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     backends: searchBackends,
   };
 
+  // TTL config (yaml: ttl)
+  const ttlRaw = obj(fileConfig, "ttl");
+  const ttl: TtlConfig = {
+    enabled: bool(ttlRaw, "enabled") ?? false,
+    l0Days: envInt("TDAI_TTL_L0_DAYS") ?? num(ttlRaw, "l0Days") ?? 30,
+    l1Days: envInt("TDAI_TTL_L1_DAYS") ?? num(ttlRaw, "l1Days") ?? 180,
+    gracePeriodDays: num(ttlRaw, "gracePeriodDays") ?? 7,
+    sweepIntervalHours: envInt("TDAI_TTL_SWEEP_HOURS") ?? num(ttlRaw, "sweepIntervalHours") ?? 24,
+    dryRun: bool(ttlRaw, "dryRun") ?? false,
+  };
+
   const offloadConfig = obj(fileConfig, "offload");
   const offload = {
     forceTriggerThreshold: num(offloadConfig, "forceTriggerThreshold") ?? 4,
@@ -818,6 +846,7 @@ export function loadGatewayConfig(overrides?: Partial<GatewayConfig>): GatewayCo
     memory,
     rateLimiter,
     search,
+    ttl,
     redis,
     shark,
     scanner,
