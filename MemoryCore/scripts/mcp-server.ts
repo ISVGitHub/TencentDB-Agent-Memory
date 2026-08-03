@@ -133,7 +133,7 @@ const tools: ToolDef[] = [
       if (args.team_id) body.team_id = args.team_id;
       if (args.user_id) body.user_id = args.user_id;
 
-      const result = await gatewayRequest("/v3/atomic/search", body);
+      const result = await gatewayRequest("POST", "/v3/atomic/search", body);
       return JSON.stringify(result, null, 2);
     },
   },
