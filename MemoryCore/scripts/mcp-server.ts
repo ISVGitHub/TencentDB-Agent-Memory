@@ -321,7 +321,9 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
         jsonrpc: "2.0",
         id: req.id,
         result: {
-          protocolVersion: "2024-11-05",
+          // Reflect the client's requested protocol version (OpenCode uses
+          // 2025-11-25); fall back to the classic 2024-11-05 otherwise.
+          protocolVersion: (req.params as { protocolVersion?: string })?.protocolVersion ?? "2024-11-05",
           capabilities: { tools: {} },
           serverInfo: {
             name: "tencentdb-agent-memory",
@@ -408,11 +410,19 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
 // ── Stdio Transport ──
 
 let buffer = "";
+/** Response framing: false = Content-Length (classic MCP), true = newline-delimited JSON.
+ *  OpenCode's local-MCP client speaks NDJSON; Claude Code speaks Content-Length.
+ *  We mirror whichever framing the incoming request used. */
+let outNdjson = false;
 
 function sendResponse(response: JsonRpcResponse): void {
   const json = JSON.stringify(response);
-  const message = `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`;
-  process.stdout.write(message);
+  if (outNdjson) {
+    process.stdout.write(json + "\n");
+  } else {
+    const message = `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`;
+    process.stdout.write(message);
+  }
 }
 
 function processMessage(data: string): void {
@@ -439,30 +449,35 @@ function processMessage(data: string): void {
 function processBuffer(): void {
   while (true) {
     const headerEnd = buffer.indexOf("\r\n\r\n");
-    if (headerEnd === -1) break;
-
-    const header = buffer.slice(0, headerEnd);
-    const contentLengthMatch = header.match(/Content-Length:\s*(\d+)/i);
-    if (!contentLengthMatch) {
-      // Try newline-delimited JSON (simpler format)
-      const newlineIdx = buffer.indexOf("\n");
-      if (newlineIdx === -1) break;
-      const line = buffer.slice(0, newlineIdx).trim();
-      buffer = buffer.slice(newlineIdx + 1);
-      if (line) processMessage(line);
-      continue;
+    if (headerEnd !== -1) {
+      const header = buffer.slice(0, headerEnd);
+      const contentLengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+      if (contentLengthMatch) {
+        const contentLength = parseInt(contentLengthMatch[1]!, 10);
+        const bodyStart = headerEnd + 4;
+        // NOTE: buffer is a UTF-8 string, so its .length is CHARACTERS, not bytes.
+        // Content-Length is in BYTES — for non-ASCII (e.g. Cyrillic) payloads the
+        // naive comparison never matches. Use Buffer.byteLength to stay byte-accurate.
+        if (Buffer.byteLength(buffer) < bodyStart + contentLength) break; // Incomplete
+        const body = buffer.slice(bodyStart, bodyStart + contentLength);
+        buffer = buffer.slice(bodyStart + contentLength);
+        outNdjson = false; // classic Content-Length framing → mirror it
+        processMessage(body);
+        continue;
+      }
+      // Has a \r\n\r\n separator but no Content-Length header — fall through
+      // to newline-delimited parsing below.
     }
 
-    const contentLength = parseInt(contentLengthMatch[1]!, 10);
-    const bodyStart = headerEnd + 4;
-    // NOTE: buffer is a UTF-8 string, so its .length is CHARACTERS, not bytes.
-    // Content-Length is in BYTES — for non-ASCII (e.g. Cyrillic) payloads the
-    // naive comparison never matches. Use Buffer.byteLength to stay byte-accurate.
-    if (Buffer.byteLength(buffer) < bodyStart + contentLength) break; // Incomplete
-
-    const body = buffer.slice(bodyStart, bodyStart + contentLength);
-    buffer = buffer.slice(bodyStart + contentLength);
-    processMessage(body);
+    // Try newline-delimited JSON (simpler format; used by OpenCode local MCP).
+    const newlineIdx = buffer.indexOf("\n");
+    if (newlineIdx === -1) break;
+    const line = buffer.slice(0, newlineIdx).trim();
+    buffer = buffer.slice(newlineIdx + 1);
+    if (line) {
+      outNdjson = true; // client speaks NDJSON → mirror it
+      processMessage(line);
+    }
   }
 }
 
