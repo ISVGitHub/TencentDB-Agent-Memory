@@ -455,7 +455,10 @@ function processBuffer(): void {
 
     const contentLength = parseInt(contentLengthMatch[1]!, 10);
     const bodyStart = headerEnd + 4;
-    if (buffer.length < bodyStart + contentLength) break; // Incomplete
+    // NOTE: buffer is a UTF-8 string, so its .length is CHARACTERS, not bytes.
+    // Content-Length is in BYTES — for non-ASCII (e.g. Cyrillic) payloads the
+    // naive comparison never matches. Use Buffer.byteLength to stay byte-accurate.
+    if (Buffer.byteLength(buffer) < bodyStart + contentLength) break; // Incomplete
 
     const body = buffer.slice(bodyStart, bodyStart + contentLength);
     buffer = buffer.slice(bodyStart + contentLength);
