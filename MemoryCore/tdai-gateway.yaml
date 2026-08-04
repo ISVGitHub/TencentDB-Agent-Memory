@@ -35,10 +35,10 @@ data:
 # provider 默认 "openai" 即直连；若要走 context_proxy（统一鉴权/账务/观测），
 # 见 tdai-gateway.proxy.yaml 或 docs/llm-via-proxy.md
 llm:
-  baseUrl: "https://api.lkeap.cloud.tencent.com/v1"
+  baseUrl: "http://127.0.0.1:8600/v1"
   apiKey: "${TDAI_LLM_API_KEY}"
-  model: "deepseek-v3.2"
-  maxTokens: 32000
+  model: "gigachat-2-pro"
+  maxTokens: 4096
   timeoutMs: 300000
 
 # ── Memory 引擎配置 ──
@@ -76,17 +76,17 @@ memory:
   storeBackend: "sqlite"
 
   embedding:
-    provider: "none"               # 默认关闭向量搜索, 仅用 BM25
-    # 开启向量搜索示例:
-    # provider: "openai"
-    # baseUrl: "https://api.openai.com/v1"
-    # apiKey: "${TDAI_LLM_API_KEY}"
-    # model: "text-embedding-3-small"
-    # dimensions: 1536
+    enabled: true
+    provider: "openai"
+    baseUrl: "http://127.0.0.1:8008/v1"          # локальный CPU-сервер fastembed (nomic)
+    apiKey: "local"
+    model: "nomic-ai/nomic-embed-text-v1.5"      # 768-dim
+    dimensions: 768
+    sendDimensions: false                        # обязателен для OSS-моделей (иначе 400)
 
   bm25:
     enabled: true
-    language: "zh"
+    language: "en"
 
 # ── Skill 模块 ──
 # Skill 是额外能力，数据存储在 {baseDir}/skills/ 下，不影响 Memory 引擎。
@@ -165,7 +165,7 @@ rateLimiter:
 
 # ── Memory TTL (自动过期) ──
 ttl:
-  enabled: false              # 默认关闭，启用后自动清理过期记录
+  enabled: true               # 启用后自动清理过期记录（L0:30d, L1:180d, grace 7d）
   l0Days: 30                  # L0 原始对话过期天数
   l1Days: 180                 # L1 原子记忆过期天数
   gracePeriodDays: 7          # 软删除后硬删除的宽限期
